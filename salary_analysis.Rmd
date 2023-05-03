@@ -1,0 +1,266 @@
+---
+title: "salary_fall22_analysis"
+author: "Victoria Stavish"
+date: "2022-11-29"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# load libraries
+
+```{r}
+
+library(tidyverse)
+library(dplyr)
+library(writexl)
+library(janitor)
+library(readxl)
+library(openxlsx)
+
+```
+
+# load data - 10,478 rows
+
+```{r}
+
+data <- read_excel("salary_2022.xlsx") %>% 
+  clean_names()
+
+```
+
+# Work for the bee swarm salary distribution graphics - this is the only graphic that truly contains ALL positions
+
+```{r}
+
+# filter for all positions across all schools to make sure I get 10,478 again
+
+all_positions <- data %>%
+  clean_names() %>%
+  select(division, title, category_status, category_status_cd, appt_base_annual_salary, primary_name) %>%
+  filter(grepl("Tenured Faculty|Tenure Track Faculty|Non-Tenured,Cont. Contr. Faculty|Non-Tenured, Term. Contr. Faculty|Non-Tenured, Non-Regular Faculty|Exempt Regular|Nonexempt Regular|Nonexempt Contingent II|Exempt Contingent II", category_status))
+
+# remove the entry for Gebregziabher, Megan McCarthy that had an annual base salary of $0
+
+all_positions <- all_positions[-7933,]
+
+
+# write that to a cleaner Excel file --> this is the file used for the beeswarm salary distribution graphic
+write.xlsx(all_positions, file = 'C:/Users/Vstav/OneDrive/Documents/GitHub/dbk_datadesk/fall22_salary_review/salary_data.xlsx')
+
+```
+
+#data dupes and top 10 peeps - DM
+```{r}
+#data dupes
+data_dupes <- data %>% 
+  clean_names() %>% 
+  group_by(division, department, title, category_status_cd, category_status, primary_name) %>% 
+  count() %>% 
+  filter(n > 1) %>%
+  left_join(data, by=c("division", "department", "title", "category_status_cd", "category_status", "primary_name")) %>% 
+  select(-n)
+
+
+#top 10 peeps
+top_ten_peeps <- all_positions %>% 
+  arrange(desc(appt_base_annual_salary)) %>% 
+  slice(1:10) %>% 
+  select(primary_name, appt_base_annual_salary)
+
+write.xlsx(top_ten_peeps, file="top_ten_peeps.xlsx")
+
+```
+
+#fact checking - DM
+```{r}
+
+#The University of Maryland spent nearly $1 billion on base salaries for fall 2022 employees
+sum_salaries <- sum(all_positions$appt_base_annual_salary)
+
+#This university’s data groups Pines and Evans with nearly 3,600 exempt, regular employees 
+exempt_regular <- all_positions %>% 
+  filter(category_status == "Exempt Regular")# %>% 
+  # group_by(title) %>% 
+  # summarise(
+  #   count = n()
+  # )
+
+#Meanwhile, coaches such as Brenda Frese and Mike Locksley are considered non-tenured faculty members, the same designation given to research scientists, librarians and lecturers. 
+
+non_tenure_cont_contr_faculty <- all_positions %>% 
+  filter(category_status == "Non-Tenured,Cont. Contr. Faculty")
+
+#Non-tenured faculty members, who work on contracts and receive lower pay than their tenured colleagues, accounted for 32 percent of university employees in 2022.
+all_non_tenure <- all_positions %>% 
+  filter(category_status == "Non-Tenured,Cont. Contr. Faculty" | category_status == "Non-Tenured, Non-Regular Faculty" | category_status == "Non-Tenured, Term. Contr. Faculty")
+
+#By comparison, just 13 percent of employees were tenured faculty members with indefinite academic appointments.
+all_tenure <- all_positions %>% 
+  filter(category_status == "Tenured Faculty")
+
+#An additional three percent served in tenure track positions
+all_tenure_track <- all_positions %>% 
+  filter(category_status == "Tenure Track Faculty")
+
+#The median salary for this group was about $8,600.
+jour_lecturers_non_tenure_non_reg <- all_positions %>% 
+  filter(division == "Philip Merrill College of Journalism" & title == "Lecturer" & category_status == "Non-Tenured, Non-Regular Faculty")
+
+median_jour<- median(jour_lecturers_non_tenure_non_reg$appt_base_annual_salary)
+
+#The median salary for business school faculty on the tenure track was $216,5165[cq], while the median[cq] for non-tenured[cq] faculty[cq] on continuing[cq] contracts[cq] was $165,313[cq].
+business_tenure_track <- all_positions %>% 
+  filter(division == "Robert H. Smith School of Business" & category_status == "Tenure Track Faculty")
+
+median_business <- median(business_tenure_track$appt_base_annual_salary)
+
+business_non_tenure <- all_positions %>% 
+  filter(division == "Robert H. Smith School of Business" & category_status == "Non-Tenured,Cont. Contr. Faculty") 
+
+median_business_non_tenure <- median(business_non_tenure$appt_base_annual_salary)
+
+
+#Both figures were more than double the university median at those positions.
+uni_tenure_track <- all_positions %>% 
+  filter(category_status == "Tenure Track Faculty")
+
+median_uni_tenure_track <- median(uni_tenure_track$appt_base_annual_salary)
+
+uni_non_tenure <- all_positions %>% 
+  filter(category_status == "Non-Tenured,Cont. Contr. Faculty")
+
+median_uni_non_tenure <- median(uni_non_tenure$appt_base_annual_salary)
+
+
+##uh oh
+uh_oh <- all_positions %>% 
+  filter(!str_detect("Office of the President|Office of Extended Studies|
+Libraries|Graduate School|Facilities Management|
+Division of Information Technology|Sr VP Academic Affairs & Provost|Undergraduate Studies|Universities at Shady Grove|
+VP Administration|VP Finance & CFO|VP Research|VP Student Affairs|VP University Relations", division)) %>% 
+  group_by(category_status) %>% 
+  summarise(
+    count = n()
+  )
+
+```
+
+
+
+# median salary overall across all positions and divisions - This is used in the HL of beeswarm distribution graphic
+```{r}
+
+median_total <- median(all_positions$appt_base_annual_salary)
+
+```
+
+# The following is work to get the numbers for the donut charts graph - This graphic only contains data for people who work in one of the 12 colleges on campus (AKA not libraries, VP Administration, etc.)
+
+```{r}
+# check all the category status types to make sure I'm not missing any
+all_categories <- all_positions %>%
+  clean_names() %>%
+  group_by(category_status) %>%
+  count()
+
+# check all the divisions to make sure I'm not missing any
+all_divisions <- all_positions %>%
+  clean_names() %>%
+  group_by(division) %>%
+  count()
+
+# dataframe that shows how many of each position exist in each division
+positions_in_division <- all_positions %>%
+  clean_names() %>%
+  group_by(division, category_status) %>%
+  count()
+
+# data frame of how many of each positions exist in each college (AKA disclude anything that isn't one of the 12 colleges at this university)
+positions_in_colleges <- all_positions %>%
+  clean_names() %>%
+  filter(!str_detect("Office of the President|Office of Extended Studies|
+Libraries|Graduate School|Facilities Management|
+Division of Information Technology|Sr VP Academic Affairs & Provost|Undergraduate Studies|Universities at Shady Grove|
+VP Administration|VP Finance & CFO|VP Research|VP Student Affairs|VP University Relations", division)) %>%
+  group_by(division, category_status) %>%
+  count() %>%
+  pivot_wider(names_from = category_status, values_from = n)
+
+# write the positions_in_colleges dataframe into an Excel sheet --> this is the Excel sheet used for the donut chart graphic
+
+write.xlsx(positions_in_colleges, file = 'C:/Users/Vstav/OneDrive/Documents/GitHub/dbk_datadesk/fall22_salary_review/position_counts.xlsx')
+
+```
+# This is the work to get the median salaries bar charts graphic - This graphic only contains data for people who work in one of the 12 colleges on campus (AKA not libraries, VP Administration, etc.)
+
+# I first found the average salaries of each position in each college, and then the average salary of each position at all colleges overall. I then combined those into one excel sheet
+
+```{r}
+
+#dataframe that shows avg salary of each position at each college
+
+avg_college_pay <- all_positions %>%
+  as.data.frame() %>%
+  clean_names() %>%
+  filter(grepl("Tenured Faculty|Tenure Track Faculty|Non-Tenured,Cont. Contr. Faculty|Non-Tenured, Term. Contr. Faculty|Non-Tenured, Non-Regular Faculty|Exempt Regular|Nonexempt Regular|Nonexempt Contingent II|Exempt Contingent II", category_status)) %>%
+  filter(!str_detect("Office of the President|Office of Extended Studies|
+Libraries|Graduate School|Facilities Management|
+Division of Information Technology|Sr VP Academic Affairs & Provost|Undergraduate Studies|Universities at Shady Grove|
+VP Administration|VP Finance & CFO|VP Research|VP Student Affairs|VP University Relations", division)) %>%
+  group_by(division, category_status) %>%
+  mutate(avg_salary = as.numeric(appt_base_annual_salary)) %>%
+  summarise(
+    avg_salary = median(appt_base_annual_salary, na.rm=TRUE)
+    ) %>%
+  pivot_wider(names_from = division, values_from = avg_salary)
+
+
+```
+# avg pay each position overall (discluding admin, libraries, etc.)
+```{r}
+
+avg_pay_all <- all_positions %>%
+  as.data.frame() %>%
+  clean_names() %>%
+  filter(grepl("Tenured Faculty|Tenure Track Faculty|Non-Tenured,Cont. Contr. Faculty|Non-Tenured, Term. Contr. Faculty|Non-Tenured, Non-Regular Faculty|Exempt Regular|Nonexempt Regular|Nonexempt Contingent II|Exempt Contingent II", category_status)) %>%
+  filter(!str_detect("Office of the President|Office of Extended Studies|
+Libraries|Graduate School|Facilities Management|
+Division of Information Technology|Sr VP Academic Affairs & Provost|Undergraduate Studies|Universities at Shady Grove|
+VP Administration|VP Finance & CFO|VP Research|VP Student Affairs|VP University Relations", division)) %>%
+  group_by(category_status) %>%
+  mutate(avg_salary = as.numeric(appt_base_annual_salary)) %>%
+  summarise(
+    avg_salary = median(appt_base_annual_salary, na.rm=TRUE)
+  )
+
+# this is me putting both the data frames avg_college_pay and avg_pay_all into an excel sheet. Sheet 1 has all avg salaries by position and college. Sheet 2 has avg salaries by position overall across all 12 colleges. To put this into Flourish, I just copy and pasted the data from Sheet 2 into Sheet 1 to add an 'all' column.
+
+salary_by_division <- list('Sheet1' = avg_college_pay, 'Sheet2' = avg_pay_all)
+write.xlsx(salary_by_division, file = 'C:/Users/Vstav/OneDrive/Documents/GitHub/dbk_datadesk/fall22_salary_review/salary_by_division.xlsx')
+
+
+
+```
+
+# THIS IS THE END OF WHAT YOU SHOULD NEED TO CHECK THE GRAPHICS
+
+```{r}
+
+
+
+counting <- all_positions %>%
+  clean_names()%>%
+  filter(!str_detect("Office of the President|Office of Extended Studies|
+Libraries|Graduate School|Facilities Management|
+Division of Information Technology|Sr VP Academic Affairs & Provost|Undergraduate Studies|Universities at Shady Grove|
+VP Administration|VP Finance & CFO|VP Research|VP Student Affairs|VP University Relations", division)) %>%
+  group_by(category_status) %>%
+  count()
+  
+
+  
+
+```
